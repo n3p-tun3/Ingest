@@ -8,7 +8,8 @@ import type {
 
 export class GroqService {
   private client: Groq;
-  private model: string = 'llama-3.3-70b-versatile';
+  private model: string = 'openai/gpt-oss-120b';
+  // private model: string = 'llama-3.3-70b-versatile';
 
   constructor(apiKey: string = process.env.GROQ_API_KEY || '') {
     if (!apiKey) {

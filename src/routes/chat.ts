@@ -34,14 +34,17 @@ app.post('/', async (c) => {
       { role: 'user', content: message }
     ];
 
-    // Load repo context if cacheKey is provided
+    // Load repo context if cacheKey is provided from previous interaction
     let repoContext: string | null = null;
+    let currentCacheKey = cacheKey;
+
     if (cacheKey) {
       const cached = await repomixService.loadFromCache(cacheKey);
       if (cached) {
         repoContext = cached.content;
       } else {
-        return c.json({ error: 'Cache key not found' }, 404);
+        // Cache key invalid, will re-pack if needed
+        currentCacheKey = undefined;
       }
     }
 
@@ -50,7 +53,7 @@ app.post('/', async (c) => {
 
     // Handle tool calls
     const toolCalls: ToolCallResult[] = [];
-    let finalCacheKey = cacheKey;
+    let finalCacheKey = currentCacheKey;
 
     if (groqService.hasToolCalls(response.message)) {
       const parsedCalls = groqService.parseToolCalls(response.message);

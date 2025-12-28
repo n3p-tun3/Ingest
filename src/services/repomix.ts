@@ -25,6 +25,43 @@ export class RepomixService {
   }
 
   /**
+   * Get the latest commit SHA from GitHub API without cloning
+   */
+  async getLatestCommitShaFromGithub(repoUrl: string): Promise<string> {
+    try {
+      // Extract owner and repo from URL
+      // e.g., https://github.com/owner/repo -> owner/repo
+      const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+      if (!match) throw new Error('Invalid GitHub URL');
+
+      const [, owner, repo] = match;
+      const cleanRepo = repo.replace('.git', '');
+
+      // Use GitHub API to get latest commit
+      const apiUrl = `https://api.github.com/repos/${owner}/${cleanRepo}/commits/main`;
+      const response = await fetch(apiUrl);
+
+      if (!response.ok) {
+        // Try 'master' branch if 'main' fails
+        const masterResponse = await fetch(
+          `https://api.github.com/repos/${owner}/${cleanRepo}/commits/master`
+        );
+        if (!masterResponse.ok) {
+          throw new Error('Could not fetch commit info from GitHub');
+        }
+        const data = await masterResponse.json();
+        return data.sha;
+      }
+
+      const data = await response.json();
+      return data.sha;
+    } catch (error) {
+      console.warn('Could not get commit SHA from GitHub API:', error);
+      return 'latest';
+    }
+  }
+
+  /**
    * Generate a cache key from repo URL and commit SHA
    */
   generateCacheKey(repoUrl: string, commitSha: string = 'latest'): string {
@@ -68,15 +105,15 @@ export class RepomixService {
   async packRepo(repoPath: string): Promise<string> {
     try {
       const outputPath = path.join(repoPath, 'repomix-output.txt');
-      
+
       console.log(`Running repomix on ${repoPath}...`);
-      
+
       // Run repomix - assumes it's globally installed
       await execAsync(`repomix ${repoPath} -o ${outputPath}`);
-      
+
       // Check if output was created
       await fs.access(outputPath);
-      
+
       return outputPath;
     } catch (error) {
       throw new Error(`Failed to pack repository: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -99,8 +136,8 @@ export class RepomixService {
    * Save packed content to cache
    */
   async saveToCache(
-    cacheKey: string, 
-    content: string, 
+    cacheKey: string,
+    content: string,
     metadata: Partial<RepoMetadata> = {}
   ): Promise<string> {
     const cachePath = path.join(this.cacheDir, `${cacheKey}.txt`);
@@ -108,7 +145,7 @@ export class RepomixService {
 
     try {
       await fs.writeFile(cachePath, content, 'utf-8');
-      
+
       const fullMetadata: RepoMetadata = {
         repoUrl: metadata.repoUrl || '',
         commitSha: metadata.commitSha || '',
@@ -134,7 +171,7 @@ export class RepomixService {
     try {
       await fs.access(cachePath);
       const content = await fs.readFile(cachePath, 'utf-8');
-      
+
       let metadata: RepoMetadata = {
         repoUrl: '',
         commitSha: '',
@@ -172,6 +209,23 @@ export class RepomixService {
    */
   async processRepo(repoUrl: string, forceRefresh: boolean = false): Promise<RepoProcessResult> {
     await this.init();
+
+    // Get commit SHA from GitHub API first (no cloning needed)
+    const commitSha = await this.getLatestCommitShaFromGithub(repoUrl);
+    const cacheKey = this.generateCacheKey(repoUrl, commitSha);
+
+    // Check cache BEFORE cloning unless force refresh
+    if (!forceRefresh) {
+      const cached = await this.loadFromCache(cacheKey);
+      if (cached) {
+        console.log('Using cached version');
+        return {
+          cacheKey,
+          fromCache: true,
+          ...cached.metadata
+        };
+      }
+    }
 
     let repoPath: string | undefined;
     try {
